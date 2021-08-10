@@ -1,0 +1,929 @@
+---
+title: "Reconstructing the Einstellung Effect"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#required packages
+library(ggplot2)
+library(plyr)
+library(BayesFactor)
+library(viridisLite)
+library(patchwork)
+library(ggridges)
+```
+
+## Main effect
+
+```{r}
+#simulated e1-solutions
+de1<-read.csv("data/esolution1.csv")
+#simulated e2-solutions
+de2<-read.csv("data/esolution2.csv")
+#simulated e1-control
+dc1<-read.csv("data/esolution_control1.csv")
+#simulated e2-control
+dc2<-read.csv("data/esolution_control2.csv")
+
+#delete X (artefact from csv saving)
+de1$X<-de2$X<-dc1$X<-dc2$X<-NULL
+
+#generate usable files
+de1<-data.frame(probs=as.vector(t(de1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+de2<-data.frame(probs=as.vector(t(de2)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+dc1<-data.frame(probs=as.vector(t(dc1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+dc2<-data.frame(probs=as.vector(t(dc2)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+
+#read in 
+d<-read.csv("data/luchinsmain.csv")
+d<-subset(d, Group != 'DBB')
+```
+
+### Reconstructed plot
+
+```{r}
+#build a model to predict E1
+m<-glm(E1~Group, data=d, family="binomial")
+
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('Control', 'Plain')), type="response", se.fit=TRUE)
+
+#get percentages
+dp1<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('Control', 'Plain'))
+
+#fit to E2
+m<-glm(E2~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('Control', 'Plain')), type="response", se.fit=TRUE)
+
+#get percentages (we add 1 to make line visible)
+dp2<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('Control','Plain'))
+
+#bind together
+dp<-rbind(dp1, dp2)
+
+#recode responses names for nicer plotting
+dp$response<-rep(c("C1/C2", "C3/C4"), each=2)
+
+#change name of Group
+dp$Group<-ifelse(dp$Group=='Plain', 'Experiment', 'Control')
+#relevel
+dp$Group<-factor(dp$Group, levels=c('Experiment', 'Control'))
+
+#color palette
+cbPalette <- c("#009E73", "#F0E442")
+
+#limits with 95% CIs
+limits <- aes(ymax = p + 1.96*se, ymin=p - 1.96*se)
+
+#plot
+p1 <- ggplot(dp, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("a) Reconstructed Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p1
+
+ggsave(
+  'figures/main_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Simulated plot
+```{r}
+dd<-rbind(subset(de1, lrate==0.5 & alpha==25), 
+          subset(de2, lrate==0.5 & alpha==25),
+          subset(dc1, lrate==0.5 & alpha==25), 
+          subset(dc2, lrate==0.5 & alpha==25))
+
+dd$Group<-rep(c('Experiment', 'Control'), each=2)
+dd$Group<-factor(dd$Group, levels=c('Experiment', 'Control'))
+
+dd$response<-rep(c('C1/C2', 'C3/C4'), 2)
+dd$p<-round(dd$probs*100)
+dd$p[4]<-1
+dd$se<-rep(0, 4)
+#plot
+p2 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("b) Simulated Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p2
+
+ggsave(
+  'figures/main_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Reconstructed statistics
+
+```{r}
+cat('Plain E1:', sum(subset(d,Group=="Plain")$E1), 'out of', length(subset(d,Group=="Plain")$E1))
+cat('Plain E2:', sum(subset(d,Group=="Plain")$E2), 'out of', length(subset(d,Group=="Plain")$E2))
+cat('Control E1:', sum(subset(d,Group=="Control")$E1), 'out of', length(subset(d,Group=="Control")$E1))
+cat('Control E2:', sum(subset(d,Group=="Control")$E2), 'out of', length(subset(d,Group=="Control")$E2))
+
+me1<-matrix(c(sum(subset(d,Group=="Plain")$E1==1), sum(subset(d,Group=="Control")$E1==1),
+              sum(subset(d,Group=="Plain")$E1==0), sum(subset(d,Group=="Control")$E1==0)), nrow=2)
+
+me1[,1]/rowSums(me1)
+chisq.test(me1, correct = FALSE)
+contingencyTableBF(me1, sampleType = "indepMulti", fixedMargin = "cols")
+
+me2<-matrix(c(sum(subset(d,Group=="Plain")$E2==1), sum(subset(d,Group=="Control")$E2==1),
+              sum(subset(d,Group=="Plain")$E2==0), sum(subset(d,Group=="Control")$E2==0)), nrow=2)
+
+me2[,1]/rowSums(me2)
+chisq.test(me2, correct = FALSE)
+contingencyTableBF(me2, sampleType = "indepMulti", fixedMargin = "cols")
+
+me3<-matrix(c(sum(subset(d,Group=="Plain")$E1==1), sum(subset(d,Group=="Plain")$E2==1),
+              sum(subset(d,Group=="Plain")$E1==0), sum(subset(d,Group=="Plain")$E2==0)), nrow=2)
+
+me3[,1]/rowSums(me3)
+chisq.test(me3, correct = FALSE)
+contingencyTableBF(me3, sampleType = "indepMulti", fixedMargin = "cols")
+
+```
+
+
+### Simulated statistics
+
+```{r}
+cat('Plain E1:', round(dd$probs[1]*100), 'out of', 100)
+cat('Plain E2:', round(dd$probs[2]*100), 'out of', 100)
+cat('Control E1:', round(dd$probs[3]*100), 'out of', 100)
+cat('Control E2:', round(dd$probs[4]*100), 'out of', 100)
+```
+
+## Don't Be Blind
+
+```{r}
+#read in original data
+d<-read.csv("data/luchinsmain.csv")
+#exlcude control group since we only want experimental and DBB group
+d<-subset(d, Group != 'Control')
+```
+
+### Reconstructed plot
+```{r}
+#model E1 response
+m<-glm(E1~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('DBB', 'Plain')), type="response", se.fit=TRUE)
+#get percentages
+dp1<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('DBB', 'Plain'))
+#model E2
+m<-glm(E2~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('DBB', 'Plain')), type="response", se.fit=TRUE)
+#get percentages
+dp2<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('Control','Plain'))
+#bind together
+dp<-rbind(dp1, dp2)
+#response for nice plotting
+dp$response<-rep(c("C1/C2", "C3/C4"), each=2)
+
+#change names for plotting
+dp$Group<-ifelse(dp$Group=='Plain', 'Experiment', 'DBB')
+#relevel
+dp$Group<-factor(dp$Group, levels=c('Experiment', 'DBB'))
+
+#plot
+p3 <- ggplot(dp, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("a) Reconstructed Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p3
+
+ggsave(
+  'figures/dbb_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Simulated plot
+
+```{r}
+dd<-rbind(subset(de1, lrate==0.5 & alpha==25), 
+          subset(de2, lrate==0.5 & alpha==25),
+          subset(de1, lrate==0.5 & alpha==30), 
+          subset(de2, lrate==0.5 & alpha==30))
+
+dd$Group<-rep(c('Experiment', 'DBB'), each=2)
+dd$Group<-factor(dd$Group, levels=c('Experiment', 'DBB'))
+
+dd$response<-rep(c('C1/C2', 'C3/C4'), 2)
+dd$p<-round(dd$probs*100)
+dd$se<-rep(0, 4)
+
+p4 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  scale_x_discrete(labels=c(expression(beta==25), expression(beta==30)))+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("b) Simulated Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p4
+
+ggsave(
+  'figures/dbb_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Reconstructed statistics
+
+```{r}
+cat('Plain E1:', sum(subset(d,Group=="Plain")$E1), 'out of', length(subset(d,Group=="Plain")$E1))
+cat('Plain E2:', sum(subset(d,Group=="Plain")$E2), 'out of', length(subset(d,Group=="Plain")$E2))
+cat('DBB E1:', sum(subset(d,Group=="DBB")$E1), 'out of', length(subset(d,Group=="DBB")$E1))
+cat('DBB E2:', sum(subset(d,Group=="DBB")$E2), 'out of', length(subset(d,Group=="DBB")$E2))
+
+me1<-matrix(c(sum(subset(d,Group=="Plain")$E1==1), sum(subset(d,Group=="DBB")$E1==1),
+              sum(subset(d,Group=="Plain")$E1==0), sum(subset(d,Group=="DBB")$E1==0)), nrow=2)
+
+me1[,1]/rowSums(me1)
+chisq.test(me1, correct = FALSE)
+contingencyTableBF(me1, sampleType = "indepMulti", fixedMargin = "cols")
+
+me2<-matrix(c(sum(subset(d,Group=="Plain")$E2==1), sum(subset(d,Group=="DBB")$E2==1),
+              sum(subset(d,Group=="Plain")$E2==0), sum(subset(d,Group=="DBB")$E2==0)), nrow=2)
+
+me2[,1]/rowSums(me2)
+chisq.test(me2, correct = FALSE)
+contingencyTableBF(me2, sampleType = "indepMulti", fixedMargin = "cols")
+
+me3<-matrix(c(sum(subset(d,Group=="DBB")$E1==1), sum(subset(d,Group=="DBB")$E2==1),
+              sum(subset(d,Group=="DBB")$E1==0), sum(subset(d,Group=="DBB")$E2==0)), nrow=2)
+
+me3[,1]/rowSums(me3)
+chisq.test(me3, correct = FALSE)
+contingencyTableBF(me3, sampleType = "indepMulti", fixedMargin = "cols")
+
+```
+
+### Simulated statistics
+
+```{r}
+cat('Plain E1:', round(dd$probs[1]*100), 'out of', 100)
+cat('Plain E2:', round(dd$probs[2]*100), 'out of', 100)
+cat('DBB E1:', round(dd$probs[3]*100), 'out of', 100)
+cat('DBB E2:', round(dd$probs[4]*100), 'out of', 100)
+```
+
+## Number of Tasks
+
+```{r}
+#reconstructed behavioral data
+d<-read.csv("data/einstellungsize.csv")
+
+#simulated data
+eshort1<-read.csv("data/e1short.csv")
+eshort2<-read.csv("data/e2short.csv")
+elong1<-read.csv("data/e1long.csv")
+elong2<-read.csv("data/e2long.csv")
+
+#delete X since it's an artefact
+eshort1$X<-eshort2$X<-elong1$X<-elong2$X<-NULL
+
+#get simulated data to usable format
+eshort1<-data.frame(probs=as.vector(t(eshort1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+eshort2<-data.frame(probs=as.vector(t(eshort2)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+elong1<-data.frame(probs=as.vector(t(elong1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+elong2<-data.frame(probs=as.vector(t(elong2)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+```
+
+### Reconstructed plot
+```{r}
+#using SE here becaus GLM struggles with only 1s as observations
+se<-function(x){sd(x)/sqrt(length(x))}
+
+#summarize behavioral data for E1
+dd1<-ddply(d, ~Tasks, summarize, p=mean(E1*100), se=se(E1*100))
+
+#summarize behavioral data for E2
+dd2<-ddply(d, ~Tasks, summarize, p=mean(E2*100), se=se(E2*100))
+#bind them together
+dp<-rbind(dd1, dd2)
+#recode response for nicer labels
+dp$response<-rep(c('C1/C2', 'C3/C4'), each=2)
+#Group is Short and Long for more or less training
+dp$Group<-rep(c('Short', 'Long'), 2)
+
+
+p5 <- ggplot(dp, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,101), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("a) Reconstructed Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p5
+
+ggsave(
+  'figures/num_tasks_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Simulated plot
+```{r}
+dd<-rbind(subset(eshort1, lrate==0.5 & alpha==15), 
+          subset(eshort2, lrate==0.5 & alpha==15),
+          subset(elong1, lrate==0.5 & alpha==15), 
+          subset(elong2, lrate==0.5 & alpha==15))
+
+dd$Group<-rep(c('Short', 'Long'), each=2)
+dd$Group<-factor(dd$Group, levels=c('Long', 'Short'))
+
+dd$response<-rep(c("C1/C2", "C3/C4"), 2)
+dd$p<-round(dd$probs*100)
+
+dd$se<-rep(0, 4)
+
+#limits with CIs
+limits <- aes(ymax = p + 1.96*se, ymin=p - 1.96*se)
+
+#plot
+p6 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,101), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("b) Simulated Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p6
+
+ggsave(
+  'figures/num_tasks_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+### Reconstructed statistics
+
+```{r}
+d$Tasks<-ifelse(d$Tasks==9, 'Long', 'Short')
+cat('Plain E1:', sum(subset(d,Tasks=="Short")$E1), 'out of', length(subset(d,Tasks=="Short")$E1))
+cat('Plain E2:', sum(subset(d,Tasks=="Short")$E2), 'out of', length(subset(d,Tasks=="Short")$E2))
+cat('Control E1:', sum(subset(d,Tasks=="Long")$E1), 'out of', length(subset(d,Tasks=="Long")$E1))
+cat('Control E2:', sum(subset(d,Tasks=="Long")$E2), 'out of', length(subset(d,Tasks=="Long")$E2))
+
+me1<-matrix(c(sum(subset(d,Tasks=="Short")$E1==1), sum(subset(d,Tasks=="Long")$E1==1),
+              sum(subset(d,Tasks=="Short")$E1==0), sum(subset(d,Tasks=="Long")$E1==0)), nrow=2)
+
+me1[,1]/rowSums(me1)
+chisq.test(me1, correct = FALSE)
+contingencyTableBF(me1, sampleType = "indepMulti", fixedMargin = "cols")
+
+me2<-matrix(c(sum(subset(d,Tasks=="Short")$E2==1), sum(subset(d,Tasks=="Long")$E2==1),
+              sum(subset(d,Tasks=="Short")$E2==0), sum(subset(d,Tasks=="Long")$E2==0)), nrow=2)
+
+me2[,1]/rowSums(me2)
+chisq.test(me2, correct = FALSE)
+contingencyTableBF(me2, sampleType = "indepMulti", fixedMargin = "cols")
+
+me3<-matrix(c(sum(subset(d,Tasks=="Short")$E1==1), sum(subset(d,Tasks=="Short")$E2==1),
+              sum(subset(d,Tasks=="Short")$E1==0), sum(subset(d,Tasks=="Short")$E2==0)), nrow=2)
+
+me3[,1]/rowSums(me3)
+chisq.test(me3, correct = FALSE)
+contingencyTableBF(me3, sampleType = "indepMulti", fixedMargin = "cols")
+
+```
+
+### Simulated statistics
+
+```{r}
+cat('Short E1:', round(dd$probs[1]*100), 'out of', 100)
+cat('Short E2:', round(dd$probs[2]*100), 'out of', 100)
+cat('Long E1:', round(dd$probs[3]*100), 'out of', 100)
+cat('Long E2:', round(dd$probs[4]*100), 'out of', 100)
+```
+
+## Alternating Tasks
+```{r}
+#reconstructed data
+d<-read.csv("data/alternating.csv")
+
+#alternated training
+ealternating<-read.csv("data/ealternating.csv")
+#remove X
+ealternating$X<-NULL
+#change to readable format
+ealternating<-data.frame(probs=as.vector(t(ealternating)), lrate=rep(seq(0, 1, len=21), 50), alpha=rep(1:50, each=21))
+#E1-solutions
+de1<-read.csv("data/esolution1.csv")
+de1$X<-NULL
+de1<-data.frame(probs=as.vector(t(de1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+
+```
+
+
+### Reconstructed plot
+```{r}
+dd<-ddply(d, ~Group, summarize, p=mean(E1*100), se=se(E1*100))
+dd$Group<-factor(dd$Group, levels=c('Plain', 'Alternating'))
+
+p7 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("a) Reconstructed Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p7
+
+ggsave(
+  'figures/alternating_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Simulated plot
+
+```{r}
+
+d1<-rbind(subset(de1, lrate==0.5 & alpha==25), subset(ealternating, lrate==0.5 & alpha==25))
+dd<-data.frame(p=d1$probs*100, Group=c('Plain', 'Alternating'), se=rep(0, 2))
+dd$Group<-factor(dd$Group, levels=c('Plain', 'Alternating'))
+
+
+p8 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("b) Simulated Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+
+  #no legend
+  theme(legend.position = "none")
+p8
+
+ggsave(
+  'figures/alternating_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Reconstructed statistics
+
+```{r}
+cat('Plain E1:', sum(subset(d,Group=="Plain")$E1), 'out of', length(subset(d,Group=="Plain")$E1))
+cat('Control E1:', sum(subset(d,Group=="Alternating")$E1), 'out of', length(subset(d,Group=="Alternating")$E1))
+
+me1<-matrix(c(sum(subset(d,Group=="Plain")$E1==1), sum(subset(d,Group=="Alternating")$E1==1),
+              sum(subset(d,Group=="Plain")$E1==0), sum(subset(d,Group=="Alternating")$E1==0)), nrow=2)
+
+me1[,1]/rowSums(me1)
+chisq.test(me1, correct = FALSE)
+contingencyTableBF(me1, sampleType = "indepMulti", fixedMargin = "cols")
+```
+
+### Simulated statistics
+
+```{r}
+cat('Plain E1:', round(dd$p[1]), 'out of', 100)
+cat('Alternating E1:', round(dd$p[2]), 'out of', 100)
+```
+
+
+
+## Time Pressure
+```{r}
+#reconstructed data
+d<-read.csv("data/speedy.csv")
+
+#simulated data
+de1<-read.csv("data/esolution1.csv")
+de2<-read.csv("data/esolution2.csv")
+de1$X<-de2$X<-NULL
+de1<-data.frame(probs=as.vector(t(de1)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+de2<-data.frame(probs=as.vector(t(de2)), lrate=rep(seq(0, 1, 0.05), 50), alpha=rep(1:50, each=21))
+```
+
+### Reconstructed plot
+
+```{r}
+d$Group<-ifelse(d$Group=='Speed', 'Speedy', paste(d$Group))
+#fit to E1
+m<-glm(E1~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('Speedy', 'Plain')), type="response", se.fit=TRUE)
+#get percentages
+dp1<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('Speedy', 'Plain'))
+#fit to E2
+m<-glm(E2~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=c('Speedy', 'Plain')), type="response", se.fit=TRUE)
+#get percentatges
+dp2<-data.frame(p=100*pred$fit+1, se=100*pred$se.fit, Group=c('Speedy', 'Plain'))
+#bind together
+dp<-rbind(dp1, dp2)
+#mark response
+dp$response<-rep(c("C1/C2", "C3/C4"), each=2)
+#change order of levels
+dp$Group<-factor(dp$Group, levels=c('Plain', 'Speedy'))
+
+#plot
+p9 <- ggplot(dp, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,104), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("a) Reconstructed Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+
+p9
+
+ggsave(
+  'figures/speed_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+
+### Simulated plot
+
+```{r}
+dd<-rbind(subset(de1, lrate==0.5 & alpha==25), 
+          subset(de2, lrate==0.5 & alpha==25),
+          subset(de1, lrate==0.5 & alpha==15), 
+          subset(de2, lrate==0.5 & alpha==15))
+
+dd$Group<-rep(c('Experiment', 'Speedy'), each=2)
+dd$Group<-factor(dd$Group, levels=c('Experiment', 'Speedy'))
+
+dd$response<-c('C1/C2', 'C3/C4', 'C3/C4', 'C1/C2')
+dd$p<-round(dd$probs*100)
+dd$se<-rep(0, 4)
+
+p10 <- ggplot(dd, aes(y=p, x=Group, fill=Group)) + 
+  #bars
+  geom_bar(position="dodge", stat="identity")+
+  #error bars
+  geom_errorbar(limits, position="dodge", width=0.1)+
+  #points
+  geom_point(size=1)+
+  scale_x_discrete(labels=c(expression(beta==25), expression(beta==15)))+
+  #color
+  scale_fill_manual(values = c(cbPalette))+
+  #theme
+  theme_minimal() +
+  #limits
+  scale_y_continuous(limits = c(0,101), expand = c(0, 0)) +
+  #two facets
+  facet_wrap(~response)+
+  #labs
+  xlab("Condition")+
+  ylab("% E-solutions")+
+  #title
+  ggtitle("b) Simulated Effect")+
+  #adjust text size
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "none")
+p10
+
+ggsave(
+  'figures/speed_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Reconstructed statistics
+
+```{r}
+cat('Speedy E1:', sum(subset(d,Group=="Speedy")$E1), 'out of', length(subset(d,Group=="Speedy")$E1))
+cat('Speedy E2:', sum(subset(d,Group=="Speedy")$E2), 'out of', length(subset(d,Group=="Speedy")$E2))
+cat('Plain E1:', sum(subset(d,Group=="Plain")$E1), 'out of', length(subset(d,Group=="Plain")$E1))
+cat('Plain E2:', sum(subset(d,Group=="Plain")$E2), 'out of', length(subset(d,Group=="Plain")$E2))
+
+me1<-matrix(c(sum(subset(d,Group=="Plain")$E1==1), sum(subset(d,Group=="Speedy")$E1==1),
+              sum(subset(d,Group=="Plain")$E1==0), sum(subset(d,Group=="Speedy")$E1==0)), nrow=2)
+
+me1[,1]/rowSums(me1)
+chisq.test(me1, correct = FALSE)
+contingencyTableBF(me1, sampleType = "indepMulti", fixedMargin = "cols")
+
+me2<-matrix(c(sum(subset(d,Group=="Plain")$E2==1), sum(subset(d,Group=="Speedy")$E2==1),
+              sum(subset(d,Group=="Plain")$E2==0), sum(subset(d,Group=="Speedy")$E2==0)), nrow=2)
+
+me2[,1]/rowSums(me2)
+chisq.test(me2, correct = FALSE)
+contingencyTableBF(me2, sampleType = "indepMulti", fixedMargin = "cols")
+```
+
+### Simulated statistics
+
+```{r}
+cat('Plain E1:', round(dd$probs[1]*100), 'out of', 100)
+cat('Plain E2:', round(dd$probs[2]*100), 'out of', 100)
+cat('Speedy E1:', round(dd$probs[4]*100), 'out of', 100)
+cat('Speedy E2:', round(dd$probs[3]*100), 'out of', 100)
+```
+
+## Developmental Effects
+```{r}
+d<-read.csv("data/luchindevelopmental.csv")
+
+es<-read.csv("data/dev_e1.csv")
+es$X<-NULL
+es<-as.vector(t(es))
+ds<-read.csv("data/dev_d1.csv")
+ds$X<-NULL
+ds<-as.vector(t(ds))
+
+```
+
+
+### Reconstructed plot
+
+```{r}
+#these are the age groups
+d$Group<-mapvalues(d$Group, unique(d$Group), 
+                   c(3, 2, 1, 4))
+m<-glm(E1~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=paste(1:4)),
+              type="response", se.fit=TRUE)
+#get into percentage
+dp<-data.frame(mu=100*pred$fit+1, se=100*pred$se.fit, 
+               Group=1:4)
+
+m<-glm(D1~Group, data=d, family="binomial")
+#predict probs and SEs
+pred<-predict(m, newdata = data.frame(Group=paste(1:4)),
+              type="response", se.fit=TRUE)
+#get into percentage
+dp1<-data.frame(mu=100*pred$fit+1, se=100*pred$se.fit, 
+               Group=1:4)
+dp<-rbind(dp, dp1)
+dp$Type<-rep(c("E1", "D1"), each=4)
+
+pd <- position_dodge(.1)
+
+
+p11<-ggplot(dp, aes(x=Group, y=mu, col=Type)) +
+  geom_point(position =pd)+
+  #error bars
+  geom_errorbar(aes(ymin=mu-1.96*se, ymax=mu+1.96*se), width=0, size=1, position=pd) +
+  #scale_color_manual(values=c("#F0E442", "#E69F00", "#009E73", "#56B4E9"))+
+  #lines
+  geom_line(position=pd, size=1.2) +
+  scale_color_manual(labels = c("D", "E"), values=cbPalette)+
+  #classic theme, legend on bottom
+  theme_minimal()+
+  #scale_x_continuous(breaks = round(seq(min(0), max(50), by = 5),1)) +
+  ylab("% response")+xlab("Age group")+
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "top")+
+  #change theme
+  ggtitle("a) Reconstructed effect")
+p11
+
+ggsave(
+  'figures/dev_exp.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+
+### Simulated plot
+
+```{r}
+dp2<-data.frame(mu=100*c(es[c(9, 10, 11, 12)], ds[c(9, 10, 11, 12)]), se=rep(0, 8), Group=dp$Group, Type=dp$Type)
+dp2$alpha<-round(rep(seq(0.45, 0.6, len=4), 2), 2)
+
+p12<-ggplot(dp2, aes(x=alpha, y=mu, col=Type)) +
+  geom_point()+
+  #error bars
+  geom_errorbar(aes(ymin=mu-1.96*se, ymax=mu+1.96*se), width=0, size=1) +
+  #scale_color_manual(values=c("#F0E442", "#E69F00", "#009E73", "#56B4E9"))+
+  #lines
+  geom_line(size=1.2) +
+  scale_color_manual(labels = c("D", "E"), values=cbPalette)+
+  #classic theme, legend on bottom
+  theme_minimal()+
+  #scale_x_continuous(breaks = round(seq(min(0), max(50), by = 5),1)) +
+  ylab("% response")+xlab(expression("Learning rate"~alpha))+
+  scale_y_continuous(limits = c(0,100), expand = c(0, 0)) +
+  theme(text = element_text(size=12,  family="sans"),
+        axis.text.x = element_text(size = 8))+
+  #no legend
+  theme(legend.position = "top")+
+  #change theme
+  ggtitle("b) Simulated effect")
+p12
+
+ggsave(
+  'figures/dev_sim.pdf',
+  width = 3.15,
+  height = 2.75,
+)
+```
+
+### Reconstructed statistics
+
+```{r}
+d<-read.csv("data/luchindevelopmental.csv")
+d$Group<-factor(d$Group, levels=c('C', 'B', 'A', 'NYU'))
+cor.test(as.numeric(d$Group), d$E1)
+correlationBF(as.numeric(d$Group), d$E1)
+cor.test(as.numeric(d$Group), d$D1)
+correlationBF(as.numeric(d$Group), d$D1)
+```
+
+
+### Simulated statistics
+```{r}
+dp2$mu<-round(dp2$mu)
+print(dp2)
+```
